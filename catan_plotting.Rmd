@@ -1,0 +1,367 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(tibbletime)
+library(ggbeeswarm)
+
+rolling_mean <- rollify(mean, window = 10)
+```
+
+
+```{r}
+df <- read.csv('catan.csv') %>%
+  filter(!is.na(game_id))
+
+df_game <- df %>%
+  select(game_id, date, num_players) %>%
+  distinct() %>%
+  mutate(date = as.Date(date, '%m/%d/%Y'))
+
+df_player <- df %>%
+  select(!c(date, num_players))
+
+df_matt <- df_player %>%
+  filter(name == 'Matt') %>%
+  select(game_id, place:road_vp) %>%
+  mutate(did_play = 1)
+colnames(df_matt)[2:9] <- paste0(colnames(df_matt)[2:9], '_matt') 
+
+df_bryan <- df_player %>%
+  filter(name == 'Bryan') %>%
+  select(game_id, place:road_vp) %>%
+  mutate(did_play = 1)
+colnames(df_bryan)[2:9] <- paste0(colnames(df_bryan)[2:9], '_bryan') 
+
+df_zach <- df_player %>%
+  filter(name == 'Zach') %>%
+  select(game_id, place:road_vp) %>%
+  mutate(did_play = 1)
+colnames(df_zach)[2:9] <- paste0(colnames(df_zach)[2:9], '_zach') 
+
+df_other <- df_player %>%
+  filter(!(name %in% c('Matt', 'Bryan', 'Zach'))) %>%
+  select(game_id) %>%
+  distinct() %>%
+  mutate(did_play_other = 1)
+
+df_analysis <- df_game %>%
+  left_join(df_matt, by = 'game_id') %>%
+  left_join(df_bryan, by = 'game_id') %>%
+  left_join(df_zach, by = 'game_id') %>%
+  filter(did_play_matt == 1 & did_play_bryan == 1 & did_play_zach == 1 & num_players == 3) %>%
+  mutate(did_win_matt = ifelse(place_matt == 1, 1, 0)) %>%
+  mutate(did_win_bryan = ifelse(place_bryan == 1, 1, 0)) %>%
+  mutate(did_win_zach = ifelse(place_zach == 1, 1, 0)) %>%
+  mutate(games_played_cumulative = cumsum(did_play_matt)) %>%
+  mutate(matt_win_pct_cumulative = cumsum(did_win_matt)/games_played_cumulative) %>%
+  mutate(bryan_win_pct_cumulative = cumsum(did_win_bryan)/games_played_cumulative) %>%
+  mutate(zach_win_pct_cumulative = cumsum(did_win_zach)/games_played_cumulative) %>%
+  mutate(matt_win_cumulative = cumsum(did_win_matt)) %>%
+  mutate(bryan_win_cumulative = cumsum(did_win_bryan)) %>%
+  mutate(zach_win_cumulative = cumsum(did_win_zach)) %>%
+  mutate(matt_avg_points_cumulative = cumsum(total_vp_matt)/games_played_cumulative) %>%
+  mutate(bryan_avg_points_cumulative = cumsum(total_vp_bryan)/games_played_cumulative) %>%
+  mutate(zach_avg_points_cumulative = cumsum(total_vp_zach)/games_played_cumulative) %>%
+  mutate(matt_win_pct_10gmrolling = rolling_mean(did_win_matt)) %>%
+  mutate(bryan_win_pct_10gmrolling = rolling_mean(did_win_bryan)) %>%
+  mutate(zach_win_pct_10gmrolling = rolling_mean(did_win_zach))
+
+table(df %>% filter(name == 'Zach' & num_players == 3) %>% select(total_vp))
+
+
+```
+
+```{r}
+
+df_plot <- df %>%
+  filter(name %in% c('Matt', 'Bryan', 'Zach', 'Andrew')) %>%
+  group_by(name) %>%
+  summarize(
+    Settlement = mean(settlement_vp),
+    City = mean(city_vp),
+    Dev_Card = mean(dev_vp),
+    Army = mean(army_vp),
+    Road = mean(road_vp)
+  ) %>%
+  tibble::column_to_rownames('name') %>%
+  mutate(Settlement = (Settlement - min(Settlement))/(max(Settlement) - min(Settlement))) %>%
+  mutate(City = (City - min(City))/(max(City) - min(City))) %>%
+  mutate(Dev_Card = (Dev_Card - min(Dev_Card))/(max(Dev_Card) - min(Dev_Card))) %>%
+  mutate(Army = (Army - min(Army))/(max(Army) - min(Army))) %>%
+  mutate(Road = (Road - min(Road))/(max(Road) - min(Road)))
+
+
+
+max_min <- data.frame(
+  Settlement = c(1, 0), 
+  City = c(1, 0), 
+  Dev_Card = c(1, 0),
+  Army = c(1, 0), 
+  Road = c(1, 0)
+)
+rownames(max_min) <- c("Max", "Min")
+
+# Bind the variable ranges to the data
+df_plot <- rbind(max_min, df_plot)
+
+create_beautiful_radarchart <- function(data, 
+                                        axistype = 0,
+                                        color = "#00AFBB", 
+                                        vlabels = colnames(data),
+                                        vlcex = 0.7,
+                                        caxislabels = NULL, 
+                                        title = NULL, ...)
+{
+  radarchart(
+    data, 
+    axistype = axistype,
+    # Customize the polygon
+    pcol = color, 
+    pfcol = scales::alpha(color, 0.5), 
+    plwd = 2, 
+    plty = 1,
+    # Customize the grid
+    cglcol = "grey", 
+    cglty = 1, 
+    cglwd = 0.8,
+    # Customize the axis
+    axislabcol = "grey", 
+    # Variable labels
+    vlcex = vlcex, 
+    vlabels = vlabels,
+    caxislabels = caxislabels, 
+    title = title, 
+    ...
+  )
+}
+
+# Solo graph
+data <- df_plot[c("Max", "Min", "Bryan"), ]
+create_beautiful_radarchart(student1_data, axistype = 0)
+
+# Same graph
+create_beautiful_radarchart(
+  data = df_plot,
+  color = c("#00AFBB", "#E7B800", "#FC4E07", "purple"),
+  caxislabels = c()
+)
+# Add an horizontal legend
+legend(
+  x = "bottom", legend = rownames(df[-c(1,2),]), horiz = TRUE,
+  bty = "n", pch = 20 , col = c("#00AFBB", "#E7B800", "#FC4E07", "purple"),
+  text.col = "black", cex = 1, pt.cex = 1.5
+  )
+
+# Factored graphs
+
+# Define colors and titles
+colors <- c("#00AFBB", "#E7B800", "#FC4E07", "purple")
+titles <- c("Andrew", "Bryan", "Matt", "Zach")
+
+# Reduce plot margin using par()
+# Split the screen in 3 parts
+op <- par(mar = c(1, 1, 1, 1))
+par(mfrow = c(1,3))
+
+# Create the radar chart
+for(i in 1:4){
+  create_beautiful_radarchart(
+    data = df_plot[c(1, 2, i+2), ],
+    color = colors[i], 
+    title = titles[i]
+    )
+}
+par(op)
+```
+```{r, fig.width=10,fig.height=6}
+
+df_plot <- df_analysis %>%
+  select(games_played_cumulative, matt_avg_points_cumulative, bryan_avg_points_cumulative, zach_avg_points_cumulative, total_vp_matt, total_vp_bryan, total_vp_zach) %>%
+  gather(key = 'key', value='points', -games_played_cumulative) %>%
+  mutate(metric = ifelse(substr(key, 1, 8) == 'total_vp', 'total_vp', 'cumulative_average')) %>%
+  mutate(player = substr(key, regexpr('matt|zach|bryan', key), regexpr('matt|zach|bryan', key)+3)) %>%
+  mutate(player = ifelse(player == 'brya', 'bryan', player)) %>%
+  select(-key) %>%
+  spread(key='metric', value='points') %>%
+  filter(games_played_cumulative > 15)
+  
+p <- ggplot(data = df_plot, aes(x = games_played_cumulative, color=player)) +
+  geom_smooth(aes(y=cumulative_average), se=FALSE, span = 0.2, linewidth = 1.5) +
+  scale_color_manual(labels = c('Bryan', 'Matt', 'Zach'), values = c('#ce2029', '#fd5800', '#000080')) + 
+  labs(title = 'Catan Average Points Scored', x = 'Games Played', y = 'Points', color = 'Player') + 
+    theme_minimal() + 
+    theme(axis.line = element_line(color='black'),
+          plot.background = element_rect(fill = "white", color = "white"),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          legend.position = 'right')
+
+plot(p)
+```
+```{r}
+df_plot <- df_analysis %>%
+  select(games_played_cumulative, total_vp_matt, total_vp_bryan, total_vp_zach) %>%
+  gather(key = 'key', value='points', -games_played_cumulative)
+  
+p <- ggplot(data = df_plot, aes(x = key, y = points, color=key)) + 
+  geom_violin() + 
+  geom_beeswarm() + 
+  scale_color_manual(labels = c('Bryan', 'Matt', 'Zach'), values = c('#ce2029', '#fd5800', '#000080')) + 
+  scale_y_continuous(breaks = c(4, 6, 8, 10)) +
+    labs(title = 'Catan Points Scored Histograms', x = NULL, y = 'Points', color = 'Player') + 
+    theme_minimal() + 
+    theme(axis.line = element_line(color='black'),
+          plot.background = element_rect(fill = "white", color = "white"),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          axis.text.x=element_blank(),
+          legend.position = 'right')
+
+plot(p)
+```
+
+```{r, fig.width = 12, fig.height=6}
+df_plot <- df %>%
+  select(name, num_players, total_vp) %>%
+  filter(name %in% c('Andrew', 'Bryan', 'Matt', 'Zach'))
+  
+p <- ggplot(data = df_plot, aes(x = name, y = total_vp, color=name)) + 
+  geom_violin() + 
+  geom_quasirandom() + 
+  scale_color_manual(labels = c('Andrew', 'Bryan', 'Matt', 'Zach'), values = c('darkgreen','#ce2029', '#fd5800', '#000080')) +
+  scale_y_continuous(breaks = c(4, 6, 8, 10)) +
+    labs(title = 'Catan Points Scored Histograms', x = NULL, y = 'Points', color = 'Player') + 
+    theme_minimal() + 
+    theme(axis.line = element_line(color='black'),
+          plot.background = element_rect(fill = "white", color = "white"),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          axis.text.x=element_blank(),
+          legend.position = 'right')
+
+plot(p)
+```
+
+
+```{r, fig.width=10,fig.height=6}
+
+df_plot <- df_analysis %>%
+  select(games_played_cumulative, matt_win_cumulative, bryan_win_cumulative, zach_win_cumulative) %>%
+  gather(key = 'player', value='wins', -games_played_cumulative)
+  
+p <- ggplot(data = df_plot, aes(x = games_played_cumulative, y = wins, color=player)) +
+  geom_smooth(se=FALSE, span = 0.2, linewidth = 1.5) +
+  scale_color_manual(labels=c('Bryan', 'Matt', 'Zach'), values = c('#ce2029', '#fd5800', '#000080')) + 
+  labs(title = 'Catan Cumulative Wins', x = 'Games Played', y = 'Wins', color = 'Player') + 
+    theme_minimal() + 
+    theme(axis.line = element_line(color='black'),
+          plot.background = element_rect(fill = "white", color = "white"),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          legend.position = 'right')
+
+plot(p)
+```
+
+```{r, fig.width=10,fig.height=6}
+
+df_plot <- df_analysis %>%
+  select(date, matt_win_cumulative, bryan_win_cumulative, zach_win_cumulative) %>%
+  gather(key = 'player', value='wins', -date)
+  
+p <- ggplot(data = df_plot, aes(x = date, y = wins, color=player)) +
+  geom_smooth(se=FALSE, span = 0.2, size = 1.5) +
+  scale_color_manual(labels=c('Bryan', 'Matt', 'Zach'), values = c('#ce2029', '#fd5800', '#000080')) + 
+  scale_x_date(date_breaks = "1 month", date_labels =  "%m/%Y")  + 
+  labs(title = 'Catan Cumulative Wins', x = 'Date', y = 'Wins', color = 'Player') + 
+    theme_minimal() + 
+    theme(axis.line = element_line(color='black'),
+          plot.background = element_rect(fill = "white", color = "white"),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          legend.position = 'right')
+
+plot(p)
+```
+
+
+```{r, fig.width=10,fig.height=6}
+
+df_plot <- df_analysis %>%
+  select(games_played_cumulative, matt_win_pct_10gmrolling, bryan_win_pct_10gmrolling, zach_win_pct_10gmrolling) %>%
+  gather(key = 'player', value='win_pct', -games_played_cumulative) %>%
+  filter(games_played_cumulative >= 10)
+  
+p <- ggplot(data = df_plot, aes(x = games_played_cumulative, y = win_pct, color=player)) +
+  geom_line(size = 1.5) +
+  scale_color_manual(labels=c('Bryan', 'Matt', 'Zach'), values = c('#ce2029', '#fd5800', '#000080')) + 
+  scale_y_continuous(labels = scales::percent) + 
+  labs(title = 'Catan Rolling 10 Game Win Percentage', x = 'Game Count', y = 'Win %', color = 'Player') + 
+    theme_minimal() + 
+    theme(axis.line = element_line(color='black'),
+          plot.background = element_rect(fill = "white", color = "white"),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          legend.position = 'right')
+
+plot(p)
+```
+
+
+```{r, fig.width=10,fig.height=6}
+
+df_plot <- df_analysis %>%
+  select(date, matt_win_pct_cumulative, bryan_win_pct_cumulative, zach_win_pct_cumulative) %>%
+  gather(key = 'player', value='win_pct', -date) %>%
+  filter(date > '2016-04-01')
+  
+p <- ggplot(data = df_plot, aes(x = date, y = win_pct, color=player)) +
+  geom_point() + 
+  geom_smooth(se=FALSE, span = 0.25) +
+  scale_color_manual(labels=c('Bryan', 'Matt', 'Zach'), values = c('#ce2029', '#fd5800', '#000080')) + 
+  scale_y_continuous(labels = scales::percent) + 
+  scale_x_date(date_breaks = "1 month", date_labels =  "%m/%Y")  + 
+  labs(title = 'Catan Cumulative Win Percentage', x = 'Date', y = 'Win %', color = 'Player') + 
+    theme_minimal() + 
+    theme(axis.line = element_line(color='black'),
+          plot.background = element_rect(fill = "white", color = "white"),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          legend.position = 'right')
+
+plot(p)
+
+```
+
+```{r, fig.width=21,fig.height=7}
+df <- read.csv('squid_update_dwh.csv') %>% 
+  mutate(date = as.Date(date, '%Y-%m-%d')) %>%
+  mutate(days_since_prior = replace_na(days_since_prior, 7))
+
+p <- ggplot(data = df, aes(y = days_since_prior, x = date, color = author, size = word_count)) + 
+  geom_point() + 
+  scale_color_brewer(palette="Set3") + 
+  scale_size(range=c(3, 7)) + 
+  ggtitle('Life Update Summary') + 
+  xlab('Date') + 
+  ylab('Days Between Updates') + 
+  labs(color = 'Author', size = 'Word Count') + 
+  theme_minimal() + 
+  theme(axis.line = element_line(color='black'),
+        plot.background = element_rect(fill = "white", color = "white"),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        legend.position = 'right',
+        aspect.ratio = 1/3)
+
+plot(p)
+ggsave('update_all.png', height = 7, width= 21)
+
+```
